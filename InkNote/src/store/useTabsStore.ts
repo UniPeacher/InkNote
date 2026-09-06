@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { EditorMode } from "../editor";
-import { getDefaultEditorMode } from "../lib/preferences";
+import { getDefaultEditorMode, getExternalOpenReadOnly } from "../lib/preferences";
 import {
   copyTextEncoding,
   UTF8_TEXT_ENCODING,
@@ -15,6 +15,27 @@ export interface TabDoc {
   dirty: boolean;
   mode: EditorMode;
   encoding: TextEncoding;
+  /** 文件关联等外部途径打开的文档 */
+  external: boolean;
+  /** 内置示例文档 */
+  sample: boolean;
+  /** 预览/编辑访问开关 */
+  editable: boolean;
+  /** 空白新标签页：内容仍为空时显示欢迎页（浏览器的「新标签页」） */
+  welcome: boolean;
+}
+
+export interface TabSnapshot {
+  path: string | null;
+  content: string;
+  diskContent: string;
+  dirty: boolean;
+  mode: EditorMode;
+  encoding: TextEncoding;
+  external: boolean;
+  sample: boolean;
+  editable: boolean;
+  welcome: boolean;
 }
 
 interface DocState {
@@ -22,19 +43,19 @@ interface DocState {
   activeId: string;
   focusMode: boolean;
   typewriterMode: boolean;
-  newTab: (content?: string) => string;
-  openTab: (path: string, content: string, encoding?: TextEncoding) => string;
+  newTab: (content?: string, opts?: { sample?: boolean; welcome?: boolean }) => string;
+  openTab: (
+    path: string,
+    content: string,
+    encoding?: TextEncoding,
+    opts?: { external?: boolean },
+  ) => string;
   closeTab: (id: string) => void;
-  restoreTab: (snap: {
-    path: string | null;
-    content: string;
-    diskContent: string;
-    dirty: boolean;
-    mode: EditorMode;
-    encoding: TextEncoding;
-  }) => void;
+  setActive: (id: string) => void;
+  restoreTab: (snap: TabSnapshot) => string;
   updateContent: (id: string, content: string) => void;
   setMode: (id: string, mode: EditorMode) => void;
+  setEditable: (id: string, editable: boolean) => void;
   /** 保存完成：只更新磁盘基线，不动正在编辑的内容 */
   markSaved: (id: string, path?: string, savedContent?: string, encoding?: TextEncoding) => void;
   /** 用磁盘内容整体替换（外部修改 / 手动重新加载） */
@@ -61,43 +82,103 @@ function emptyTab(): TabDoc {
     dirty: false,
     mode: getDefaultEditorMode(),
     encoding: copyTextEncoding(UTF8_TEXT_ENCODING),
+    external: false,
+    sample: false,
+    editable: true,
+    welcome: true,
   };
 }
 
-/** 单文档编辑：始终只保留一个活动文档槽位 */
+/** 多标签编辑：打开过的文档各占一个标签，互不覆盖 */
 export const useTabsStore = create<DocState>((set, get) => ({
   tabs: [emptyTab()],
   activeId: "",
   focusMode: false,
   typewriterMode: false,
 
-  newTab: (content = "") => {
-    const tab = emptyTab();
-    tab.content = content;
-    tab.dirty = Boolean(content);
-    set({ tabs: [tab], activeId: tab.id });
+  newTab: (content = "", opts) => {
+    const sample = opts?.sample === true;
+    const tab: TabDoc = {
+      id: newId(),
+      path: null,
+      content,
+      diskContent: content,
+      dirty: Boolean(content),
+      mode: sample ? "preview" : getDefaultEditorMode(),
+      encoding: copyTextEncoding(UTF8_TEXT_ENCODING),
+      external: false,
+      sample,
+      editable: !sample,
+      welcome: opts?.welcome === true,
+    };
+    set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
     return tab.id;
   },
 
-  openTab: (path, content, encoding = UTF8_TEXT_ENCODING) => {
-    set(() => {
+  openTab: (path, content, encoding = UTF8_TEXT_ENCODING, opts) => {
+    const external = opts?.external === true;
+    const editable = !(external && getExternalOpenReadOnly());
+    const mode: EditorMode = editable ? getDefaultEditorMode() : "preview";
+    set((s) => {
+      const existing = s.tabs.find((t) => t.path === path);
+      if (existing) {
+        // 有未保存修改的标签只切换过去，绝不能拿磁盘内容覆盖本地编辑
+        if (existing.dirty) return { activeId: existing.id };
+        return {
+          activeId: existing.id,
+          tabs: s.tabs.map((t) =>
+            t.id === existing.id
+              ? {
+                  ...t,
+                  content,
+                  diskContent: content,
+                  dirty: false,
+                  mode,
+                  encoding: copyTextEncoding(encoding),
+                  external,
+                  sample: false,
+                  editable,
+                  welcome: false,
+                }
+              : t,
+          ),
+        };
+      }
       const tab: TabDoc = {
         id: newId(),
         path,
         content,
         diskContent: content,
         dirty: false,
-        mode: getDefaultEditorMode(),
+        mode,
         encoding: copyTextEncoding(encoding),
+        external,
+        sample: false,
+        editable,
+        welcome: false,
       };
-      return { tabs: [tab], activeId: tab.id };
+      return { tabs: [...s.tabs, tab], activeId: tab.id };
     });
     return get().activeId;
   },
 
-  closeTab: (_id) => {
-    const tab = emptyTab();
-    set({ tabs: [tab], activeId: tab.id });
+  closeTab: (id) => {
+    set((s) => {
+      const index = s.tabs.findIndex((t) => t.id === id);
+      if (index === -1) return s;
+      const tabs = s.tabs.filter((t) => t.id !== id);
+      if (!tabs.length) {
+        const tab = emptyTab();
+        return { tabs: [tab], activeId: tab.id };
+      }
+      if (s.activeId !== id) return { tabs };
+      const neighbor = tabs[index] ?? tabs[index - 1];
+      return { tabs, activeId: neighbor.id };
+    });
+  },
+
+  setActive: (id) => {
+    set((s) => (s.tabs.some((t) => t.id === id) ? { activeId: id } : s));
   },
 
   restoreTab: (snap) => {
@@ -109,8 +190,13 @@ export const useTabsStore = create<DocState>((set, get) => ({
       dirty: snap.dirty,
       mode: snap.mode,
       encoding: copyTextEncoding(snap.encoding),
+      external: snap.external,
+      sample: snap.sample,
+      editable: snap.editable,
+      welcome: snap.welcome,
     };
-    set({ tabs: [tab], activeId: tab.id });
+    set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
+    return tab.id;
   },
 
   updateContent: (id, content) => {
@@ -124,6 +210,12 @@ export const useTabsStore = create<DocState>((set, get) => ({
   setMode: (id, mode) => {
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, mode } : t)),
+    }));
+  },
+
+  setEditable: (id, editable) => {
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, editable } : t)),
     }));
   },
 

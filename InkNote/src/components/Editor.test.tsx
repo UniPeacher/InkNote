@@ -24,6 +24,7 @@ describe("Editor document replacement", () => {
       <Editor
         ref={ref}
         locale="en"
+        docId="test-doc"
         value={content}
         mode="preview"
         filePath={null}
@@ -54,6 +55,7 @@ describe("Editor document replacement", () => {
       <Editor
         ref={ref}
         locale="en"
+        docId="test-doc"
         value={value}
         mode="preview"
         filePath={null}

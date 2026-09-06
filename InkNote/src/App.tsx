@@ -6,6 +6,7 @@ import { disable as disableAutostart, enable as enableAutostart, isEnabled as is
 import { Eye, Pencil } from "lucide-react";
 import type { EditorRef } from "./components/Editor";
 import Titlebar from "./components/Titlebar";
+import TabBar from "./components/TabBar";
 import Sidebar, { type SidebarTab } from "./components/Sidebar";
 import { SidebarPanel } from "./components/SidebarPanel";
 import StatusBar from "./components/StatusBar";
@@ -179,9 +180,10 @@ export default function App() {
     dirty: boolean;
     mode: TabDoc["mode"];
     encoding: TabDoc["encoding"];
-    externalDocument: boolean;
-    documentEditable: boolean;
-    sampleDocument: boolean;
+    external: boolean;
+    sample: boolean;
+    editable: boolean;
+    welcome: boolean;
     pendingImages: PendingImageSnapshot[];
   } | null>(null);
   const { message: toastMessage, toastKind, show, showSuccess, showError } = useToast();
@@ -190,7 +192,6 @@ export default function App() {
   const automaticUpdateCheckStartedRef = useRef(false);
   const availableUpdateRef = useRef<Update | null>(null);
   const closingRef = useRef(false);
-  const fileLoadRequestRef = useRef(0);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressState | null>(null);
   const confirmResolveRef = useRef<((v: boolean) => void) | null>(null);
   const linkResolveRef = useRef<((v: { text: string; url: string } | null) => void) | null>(null);
@@ -205,9 +206,11 @@ export default function App() {
     openTab,
     newTab,
     closeTab,
+    setActive,
     restoreTab,
     updateContent,
     setMode,
+    setEditable,
     markSaved,
     loadFromDisk,
     setPath,
@@ -218,6 +221,9 @@ export default function App() {
 
   const active = getActive();
   const activeTabId = active?.id ?? activeId;
+  // 访问控制（预览/编辑）与来源标记都跟文档走：多标签下属于每个标签自己
+  const externalDocument = active?.external ?? false;
+  const documentEditable = active?.editable ?? true;
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
@@ -232,6 +238,8 @@ export default function App() {
   const [folderPaths, setFolderPaths] = useState<string[]>([]);
   const [dirTick, setDirTick] = useState(0);
   const [recentFiles, setRecentFiles] = useState(getRecentFiles);
+  const [recentSorted, setRecentSorted] = useState<string[]>(getRecentFiles);
+  const recentSortRequestRef = useRef(0);
   const [reloadPrompt, setReloadPrompt] = useState(false);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState<string | null>(null);
@@ -285,10 +293,6 @@ export default function App() {
   const [newDocumentMetadata, setNewDocumentMetadata] = useState(getNewDocumentMetadata);
   const [metadataTitle, setMetadataTitle] = useState(getMetadataTitle);
   const [metadataAuthor, setMetadataAuthor] = useState(getMetadataAuthor);
-  const [externalDocument, setExternalDocument] = useState(false);
-  const [documentEditable, setDocumentEditable] = useState(true);
-  const [sampleDocument, setSampleDocument] = useState(false);
-  const [welcomeDismissed, setWelcomeDismissed] = useState(false);
 
   const showOutlineForExternalOpen = useCallback(() => {
     const editorState = useTabsStore.getState();
@@ -385,10 +389,10 @@ export default function App() {
     let preparedImages: Awaited<ReturnType<typeof preparePendingImages>> = [];
     let documentWritten = false;
     try {
-      preparedImages = await preparePendingImages(tab.path, tab.content);
+      preparedImages = await preparePendingImages(tab.id, tab.path, tab.content);
       await api.writeTextFile(tab.path, tab.content, tab.encoding);
       documentWritten = true;
-      commitPendingImages(preparedImages);
+      commitPendingImages(tab.id, preparedImages);
       editorRef.current?.refreshPreview();
       try {
         await cleanupRemovedManagedImages(tab.path, tab.diskContent, tab.content);
@@ -404,36 +408,19 @@ export default function App() {
     }
   }, [markSaved, showError]);
 
-  const confirmDiscardIfNeeded = useCallback(async () => {
-    const tab = getActive();
-    if (!tab?.dirty) return true;
-    if (tab.path) return saveExistingTab(tab);
-    if (!confirmDiscard) return true;
-    return askConfirm(t(locale, "confirm.discard"));
-  }, [getActive, saveExistingTab, confirmDiscard, locale, askConfirm]);
-
   const loadFile = useCallback(
     async (path: string, options: { external?: boolean } = {}) => {
-      if (!(await confirmDiscardIfNeeded())) return false;
-      const request = ++fileLoadRequestRef.current;
       const external = options.external === true;
       try {
         const file = await api.readTextFile(path);
-        if (request !== fileLoadRequestRef.current) return false;
-        clearPendingImages();
-        const openedId = openTab(path, file.content, file.encoding);
-        if (external && externalOpenReadOnly) setMode(openedId, "preview");
-        setExternalDocument(external);
-        setDocumentEditable(!(external && externalOpenReadOnly));
-        setSampleDocument(false);
+        // 已存在同一标签：干净则用磁盘内容刷新，有未保存修改则只切换过去
+        const openedId = openTab(path, file.content, file.encoding, { external });
         addRecentFile(path);
         setRecentFiles(getRecentFiles());
-        setTitle(path);
         if (!external) setLastFile(path);
         void api.watchFile(path).catch(showError);
-        return true;
+        return Boolean(openedId);
       } catch (e) {
-        if (request !== fileLoadRequestRef.current) return false;
         removeRecentFile(path);
         if (!external && getLastFile() === path) clearLastFile();
         setRecentFiles(getRecentFiles());
@@ -441,7 +428,7 @@ export default function App() {
         return false;
       }
     },
-    [openTab, setMode, setTitle, confirmDiscardIfNeeded, showError, externalOpenReadOnly],
+    [openTab, showError],
   );
 
   const openFileAtLine = useCallback(
@@ -501,10 +488,10 @@ export default function App() {
       try {
         // 先把未落盘的粘贴图片写出去，再写文档 —— 顺序反了会先触发一次
         // 「图片文件不存在」的重建
-        preparedImages = await preparePendingImages(path, tab.content);
+        preparedImages = await preparePendingImages(tab.id, path, tab.content);
         await api.writeTextFile(path, tab.content, tab.encoding);
         documentWritten = true;
-        commitPendingImages(preparedImages);
+        commitPendingImages(tab.id, preparedImages);
         editorRef.current?.refreshPreview();
         if (tab.path && tab.path === path) {
           try {
@@ -540,10 +527,10 @@ export default function App() {
     let documentWritten = false;
     try {
       managedImages = await prepareManagedImagesForSaveAs(tab.path, p, tab.content);
-      preparedImages = await preparePendingImages(p, managedImages.content);
+      preparedImages = await preparePendingImages(tab.id, p, managedImages.content);
       await api.writeTextFile(p, managedImages.content, UTF8_TEXT_ENCODING);
       documentWritten = true;
-      commitPendingImages(preparedImages);
+      commitPendingImages(tab.id, preparedImages);
       editorRef.current?.refreshPreview();
       const currentTab = useTabsStore.getState().tabs.find((candidate) => candidate.id === tab.id);
       if (currentTab) {
@@ -573,7 +560,7 @@ export default function App() {
     if (!path) return;
     try {
       const { markdownToHtml } = await import("./render/export");
-      const pendingImages = await pendingImageDataUrls();
+      const pendingImages = await pendingImageDataUrls(tab.id);
       const html = await markdownToHtml(tab.content, resolveTheme(), locale, tab.path, true, markdownTheme, pendingImages);
       await api.writeFile(path, html);
       showSuccess(t(locale, "toast.exported"));
@@ -591,7 +578,7 @@ export default function App() {
     if (!path) return;
     try {
       const { markdownToHtml } = await import("./render/export");
-      const pendingImages = await pendingImageDataUrls();
+      const pendingImages = await pendingImageDataUrls(tab.id);
       const html = await markdownToHtml(tab.content, resolveTheme(), locale, tab.path, true, markdownTheme, pendingImages);
       await api.exportPdf(path, html);
       showSuccess(t(locale, "toast.exported"));
@@ -601,21 +588,13 @@ export default function App() {
   }, [getActive, locale, markdownTheme, showError, showSuccess]);
 
   const handleNewFile = useCallback(async () => {
-    if (!(await confirmDiscardIfNeeded())) return;
-    fileLoadRequestRef.current++;
-    clearPendingImages();
-    setExternalDocument(false);
-    setDocumentEditable(true);
-    setSampleDocument(false);
-    setWelcomeDismissed(true);
     clearLastFile();
     newTab(createNewDocumentContent());
-    setTitle(null);
     show(t(locale, "toast.newDocument"));
-  }, [newTab, createNewDocumentContent, setTitle, confirmDiscardIfNeeded, show, locale]);
+  }, [newTab, createNewDocumentContent, show, locale]);
 
-  const handleCloseFile = useCallback(async () => {
-    const tab = getActive();
+  const closeDocument = useCallback(async (tabId?: string) => {
+    const tab = tabId ? tabs.find((t) => t.id === tabId) : getActive();
     if (!tab) return;
     let savedBeforeClose = false;
     if (tab.dirty && tab.path) {
@@ -626,32 +605,28 @@ export default function App() {
       const ok = await askConfirm(t(locale, "confirm.close"));
       if (!ok) return;
     }
-    const closedSnapshot = {
-      path: tab.path,
-      content: tab.content,
-      diskContent: savedBeforeClose ? tab.content : tab.diskContent,
-      dirty: savedBeforeClose ? false : tab.dirty,
-      mode: tab.mode,
-      encoding: tab.encoding,
-      externalDocument,
-      documentEditable,
-      sampleDocument,
-      pendingImages: snapshotPendingImages(),
-    };
-    fileLoadRequestRef.current++;
-    clearPendingImages();
-    setExternalDocument(false);
-    setDocumentEditable(true);
-    setSampleDocument(false);
-    setWelcomeDismissed(false);
     if (tab.path || tab.content.trim()) {
-      closedDocRef.current = closedSnapshot;
+      closedDocRef.current = {
+        path: tab.path,
+        content: tab.content,
+        diskContent: savedBeforeClose ? tab.content : tab.diskContent,
+        dirty: savedBeforeClose ? false : tab.dirty,
+        mode: tab.mode,
+        encoding: tab.encoding,
+        external: tab.external,
+        sample: tab.sample,
+        editable: tab.editable,
+        welcome: tab.welcome,
+        pendingImages: snapshotPendingImages(tab.id),
+      };
       setCanReopenClosed(true);
     }
+    clearPendingImages(tab.id);
     closeTab(tab.id);
-    if (!externalDocument && !sampleDocument) clearLastFile();
-    setTitle(null);
-  }, [getActive, closeTab, setTitle, saveExistingTab, confirmDiscard, locale, askConfirm, externalDocument, documentEditable, sampleDocument]);
+    if (!tab.external && !tab.sample && getLastFile() === tab.path) clearLastFile();
+  }, [tabs, getActive, closeTab, saveExistingTab, confirmDiscard, locale, askConfirm]);
+
+  const handleCloseFile = useCallback(() => { void closeDocument(); }, [closeDocument]);
 
   const handleReopenClosed = useCallback(async () => {
     const snap = closedDocRef.current;
@@ -659,29 +634,32 @@ export default function App() {
       show(t(locale, "toast.nothingToReopen"));
       return;
     }
-    if (!(await confirmDiscardIfNeeded())) return;
-    fileLoadRequestRef.current++;
-    restorePendingImages(snap.pendingImages);
     restoreTab(snap);
-    setExternalDocument(snap.externalDocument);
-    setDocumentEditable(snap.documentEditable);
-    setSampleDocument(snap.sampleDocument);
-    setWelcomeDismissed(true);
+    const reopenedId = getActive()?.id;
+    if (reopenedId) restorePendingImages(reopenedId, snap.pendingImages);
     closedDocRef.current = null;
     setCanReopenClosed(false);
-    setTitle(snap.path);
     if (snap.path) {
       try {
-        if (!snap.externalDocument) setLastFile(snap.path);
+        if (!snap.external) setLastFile(snap.path);
         await api.watchFile(snap.path);
       } catch (e) {
         showError(e);
       }
-    } else {
-      api.unwatchFile();
     }
     show(t(locale, "toast.reopened"));
-  }, [confirmDiscardIfNeeded, restoreTab, setTitle, show, showError, locale]);
+  }, [restoreTab, getActive, show, showError, locale]);
+
+  /** 重命名/移动后同步所有受影响的标签（不止活动标签） */
+  const remapTabPaths = useCallback((oldPath: string, newPath: string) => {
+    const sep = oldPath.includes("\\") ? "\\" : "/";
+    for (const t of useTabsStore.getState().tabs) {
+      if (t.path === oldPath) setPath(t.id, newPath);
+      else if (t.path?.startsWith(oldPath + sep)) {
+        setPath(t.id, `${newPath}${sep}${t.path.slice(oldPath.length + 1)}`);
+      }
+    }
+  }, [setPath]);
 
   const handleRenamePath = useCallback(
     async (path: string, newName: string, _isDir: boolean) => {
@@ -698,13 +676,7 @@ export default function App() {
         remapRecentFiles(path, newPath);
         remapLastFile(path, newPath);
         // 只换路径：重命名不该把「未保存」状态抹掉
-        if (active?.path === path) {
-          setPath(active.id, newPath);
-        } else if (active?.path?.startsWith(path + (path.includes("\\") ? "\\" : "/"))) {
-          const sep = path.includes("\\") ? "\\" : "/";
-          const rel = active.path.slice(path.length + 1);
-          setPath(active.id, `${newPath}${sep}${rel}`);
-        }
+        remapTabPaths(path, newPath);
         setDirTick((t) => t + 1);
         setRecentFiles(getRecentFiles());
         return true;
@@ -713,15 +685,15 @@ export default function App() {
         return false;
       }
     },
-    [active, setPath, showError, locale],
+    [remapTabPaths, showError, locale],
   );
 
   const handleMovePath = useCallback((oldPath: string, newPath: string) => {
     remapRecentFiles(oldPath, newPath);
     remapLastFile(oldPath, newPath);
-    if (active?.path === oldPath) setPath(active.id, newPath);
+    remapTabPaths(oldPath, newPath);
     setRecentFiles(getRecentFiles());
-  }, [active, setPath]);
+  }, [remapTabPaths]);
 
   const handleDeletePath = useCallback(
     async (path: string, isDir: boolean) => {
@@ -734,25 +706,21 @@ export default function App() {
         if (!ok) return false;
       }
       const sep = path.includes("\\") ? "\\" : "/";
-      const affectsActive = active?.path === path || (isDir && active?.path?.startsWith(path + sep));
-      if (affectsActive && active?.dirty && confirmDiscard) {
+      const affected = useTabsStore
+        .getState()
+        .tabs.filter((t) => t.path === path || (isDir && t.path?.startsWith(path + sep)));
+      if (affected.some((t) => t.dirty) && confirmDiscard) {
         const ok = await askConfirm(t(locale, "confirm.discard"));
         if (!ok) return false;
       }
-      if (affectsActive) fileLoadRequestRef.current++;
       try {
         if (!isDir && /\.(md|markdown|txt)$/i.test(path)) await removeDocumentWithManagedImages(path);
         else await api.removePath(path);
         removeRecentFilesUnder(path);
         clearLastFileUnder(path);
-        if (affectsActive) {
-          clearPendingImages();
-          newTab();
-          setExternalDocument(false);
-          setDocumentEditable(true);
-          setSampleDocument(false);
-          setWelcomeDismissed(false);
-          setTitle(null);
+        for (const tab of affected) {
+          clearPendingImages(tab.id);
+          closeTab(tab.id);
         }
         setDirTick((t) => t + 1);
         setRecentFiles(getRecentFiles());
@@ -762,7 +730,7 @@ export default function App() {
         return false;
       }
     },
-    [active, confirmDelete, confirmDiscard, locale, showError, askConfirm, newTab, setTitle],
+    [confirmDelete, confirmDiscard, locale, showError, askConfirm, closeTab],
   );
 
   const handleCreateFileInFolder = useCallback(
@@ -907,45 +875,28 @@ export default function App() {
   }, [getActive, loadFromDisk, show, showError, locale]);
 
   const handleOpenSample = useCallback(async () => {
-    if (!(await confirmDiscardIfNeeded())) return;
-    const request = ++fileLoadRequestRef.current;
     try {
       const res = await fetch("/sample.md");
       if (!res.ok) throw new Error(`Could not load sample document (${res.status})`);
       const text = await res.text();
-      if (request !== fileLoadRequestRef.current) return;
-      clearPendingImages();
-      setExternalDocument(false);
-      setDocumentEditable(false);
-      setSampleDocument(true);
-      const tabId = newTab(text);
+      const tabId = newTab(text, { sample: true });
       markSaved(tabId, undefined, text);
-      setMode(tabId, "preview");
-      setTitle(null);
+      show(t(locale, "toast.sampleOpened"));
     } catch (e) {
-      if (request === fileLoadRequestRef.current) showError(e);
+      showError(e);
     }
-  }, [confirmDiscardIfNeeded, newTab, markSaved, setMode, setTitle, showError]);
+  }, [newTab, markSaved, show, showError, locale]);
 
   const handleDroppedMarkdown = useCallback(
     async (content: string, path?: string) => {
       if (path) {
-        await loadFile(path, { external: true });
+        await loadFile(path);
         return;
       }
-      if (!(await confirmDiscardIfNeeded())) return;
-      fileLoadRequestRef.current++;
-      clearPendingImages();
-      setExternalDocument(false);
-      setDocumentEditable(true);
-      setSampleDocument(false);
-      clearLastFile();
-      newTab();
-      const tab = getActive();
-      if (tab) updateContent(tab.id, content);
-      setTitle(null);
+      const tabId = newTab();
+      updateContent(tabId, content);
     },
-    [loadFile, confirmDiscardIfNeeded, newTab, getActive, updateContent, setTitle],
+    [loadFile, newTab, updateContent],
   );
 
   const handleToggleFocus = useCallback(() => {
@@ -1024,17 +975,13 @@ export default function App() {
     updateRunningRef.current = true;
     let installed = false;
     try {
-      const activeTab = getActive();
-      if (activeTab?.dirty && !(await saveTab(activeTab.id))) {
-        return;
+      // 重启前保存所有未保存的标签，任一失败都中止安装
+      const dirtyTabs = useTabsStore.getState().tabs.filter((t) => t.dirty);
+      for (const tab of dirtyTabs) {
+        const saved = tab.path ? await saveExistingTab(tab) : Boolean(await saveTab(tab.id));
+        if (!saved) return;
       }
-      const latestTab = useTabsStore.getState().getActive();
-      if (latestTab?.dirty) {
-        const savedAgain = latestTab.path
-          ? await saveExistingTab(latestTab)
-          : Boolean(await saveTab(latestTab.id));
-        if (!savedAgain || useTabsStore.getState().getActive()?.dirty) return;
-      }
+      if (useTabsStore.getState().tabs.some((t) => t.dirty)) return;
 
       let downloaded = 0;
       let total = 0;
@@ -1402,20 +1349,23 @@ export default function App() {
       } else if (payload.type === "drop") {
         hoverRequest++;
         setTreeDropTarget(null);
-        const path = payload.paths.find((candidate) => /\.(md|markdown|txt)$/i.test(candidate));
-        if (!path) return;
+        const paths = payload.paths.filter((candidate) => /\.(md|markdown|txt)$/i.test(candidate));
+        if (!paths.length) return;
         void directoryAt(payload.position).then(async (targetDir) => {
           if (disposed) return;
           if (targetDir) {
             try {
-              const copiedPath = await handleTransferPath(path, targetDir, "copy");
-              if (copiedPath) finishImportedFile(copiedPath, basename(copiedPath) !== basename(path));
+              const copiedPath = await handleTransferPath(paths[0], targetDir, "copy");
+              if (copiedPath) finishImportedFile(copiedPath, basename(copiedPath) !== basename(paths[0]));
             } catch (error) {
               showError(error);
             }
             return;
           }
-          await loadFile(path, { external: true });
+          // 拖入即当作普通文件打开：每个文件各占一个标签，可直接编辑
+          for (const path of paths) {
+            await loadFile(path);
+          }
         });
       }
     }).then((fn) => {
@@ -1435,26 +1385,28 @@ export default function App() {
     closingRef.current = true;
     await flushSettingsStore();
 
-    const tab = getActive();
-    if (!tab?.dirty) {
-      await win.destroy();
-      return;
-    }
-
-    if (!tab.path) {
+    // 逐个保存所有未保存的标签；任一失败/取消都放弃关窗
+    const dirtyTabs = useTabsStore.getState().tabs.filter((t) => t.dirty);
+    for (const tab of dirtyTabs) {
+      if (tab.path) {
+        if (!(await saveExistingTab(tab))) {
+          closingRef.current = false;
+          return;
+        }
+        continue;
+      }
       const shouldSave = await askConfirm(t(locale, "confirm.saveBeforeClose"));
       if (!shouldSave) {
         closingRef.current = false;
         return;
       }
       const path = await saveTab(tab.id);
-      if (path) await win.destroy();
-      else closingRef.current = false;
-      return;
+      if (!path) {
+        closingRef.current = false;
+        return;
+      }
     }
-
-    if (await saveExistingTab(tab)) await win.destroy();
-    else closingRef.current = false;
+    await win.destroy();
   };
 
   useEffect(() => {
@@ -1598,8 +1550,6 @@ export default function App() {
       if (disposed) fn();
       else unlisten = fn;
     });
-    setExternalDocument(false);
-    setDocumentEditable(true);
 
     return () => {
       disposed = true;
@@ -1698,6 +1648,27 @@ export default function App() {
     invalidateWorkspaceFileCache();
   }, [dirTick, folderPaths, recentFiles]);
 
+  // 「最近」面板按文件编辑时间（mtime）排序展示，而非打开顺序；
+  // dirTick 变化（工作区文件变动）时同步刷新，外部编辑也能及时浮到顶部。
+  useEffect(() => {
+    const request = ++recentSortRequestRef.current;
+    if (!recentFiles.length) {
+      setRecentSorted([]);
+      return;
+    }
+    void api
+      .fileMtimes(recentFiles)
+      .then((mtimes) => {
+        if (request !== recentSortRequestRef.current) return;
+        const paired = recentFiles.map((path, index) => ({ path, mtime: mtimes[index] ?? -1 }));
+        paired.sort((a, b) => b.mtime - a.mtime);
+        setRecentSorted(paired.map((item) => item.path));
+      })
+      .catch(() => {
+        if (request === recentSortRequestRef.current) setRecentSorted(recentFiles);
+      });
+  }, [recentFiles, dirTick]);
+
   useEffect(() => {
     setTitle(active?.path ?? null);
     if (active?.path) api.watchFile(active.path).catch(showError);
@@ -1728,14 +1699,15 @@ export default function App() {
   }, [externalDocument, active?.id, showOutlineForExternalOpen]);
 
   const setDocumentAccessMode = useCallback((editable: boolean) => {
-    if (documentEditable === editable) return;
+    if (!activeTabId || documentEditable === editable) return;
     if (editable) editorRef.current?.resetContent(active?.content ?? "");
-    if (!editable && activeTabId) setMode(activeTabId, "preview");
-    setDocumentEditable(editable);
+    if (!editable) setMode(activeTabId, "preview");
+    setEditable(activeTabId, editable);
     show(t(locale, editable ? "toast.editMode" : "toast.previewMode"));
-  }, [documentEditable, active?.content, activeTabId, setMode, show, locale]);
+  }, [documentEditable, active?.content, activeTabId, setMode, setEditable, show, locale]);
 
-  const showWelcome = !welcomeDismissed && !active?.path && !active?.content.trim();
+  // 空白新标签页（未打开文件、无内容）显示欢迎页，即浏览器的「新标签页」
+  const showWelcome = Boolean(active?.welcome && !active?.path && !active?.content.trim());
   const showDocumentAccessControl = Boolean(active && !showWelcome);
   const wasWelcomeRef = useRef(showWelcome);
 
@@ -1834,7 +1806,7 @@ export default function App() {
         onOpenRecent={(p) => void loadFile(p)}
         onReopenClosed={() => void handleReopenClosed()}
         canReopenClosed={canReopenClosed}
-        recentFiles={recentFiles}
+        recentFiles={recentSorted}
       />
       <div className="app-body">
         {sidebarVisible && !focusMode && (
@@ -1863,7 +1835,7 @@ export default function App() {
               activeOutlineLine={activeOutlineLine}
               onOutlineClick={scrollToHeading}
               currentPath={active?.path ?? null}
-              recentFiles={recentFiles}
+              recentFiles={recentSorted}
               onRemoveRecent={handleRemoveRecent}
               onOpenFolder={() => void openFolder()}
               onError={showError}
@@ -1875,6 +1847,14 @@ export default function App() {
           </SidebarPanel>
         )}
         <main className={`main${showDocumentAccessControl ? " has-document-access-control" : ""}`}>
+          <TabBar
+            locale={locale}
+            tabs={tabs}
+            activeId={activeTabId}
+            onSelect={setActive}
+            onClose={(id) => void closeDocument(id)}
+            onNew={() => newTab("", { welcome: true })}
+          />
           {showDocumentAccessControl && (
             <button
               type="button"
@@ -1891,7 +1871,7 @@ export default function App() {
           {showWelcome && (
             <WelcomePanel
               locale={locale}
-              recentFiles={recentFiles}
+              recentFiles={recentSorted}
               onNew={() => void handleNewFile()}
               onOpen={() => void openFile()}
               onOpenFolder={() => void openFolder()}
@@ -1906,6 +1886,7 @@ export default function App() {
                 ref={editorRef}
                 locale={locale}
                 key={active.id}
+                docId={active.id}
                 value={active.content}
                 mode={active.mode}
                 filePath={active.path}
@@ -2176,7 +2157,7 @@ export default function App() {
           <QuickOpenDialog
             locale={locale}
             folderPaths={folderPaths}
-            recentFiles={recentFiles}
+            recentFiles={recentSorted}
             currentPath={active?.path ?? null}
             onOpen={(p) => void loadFile(p)}
             onClose={() => setQuickOpenOpen(false)}

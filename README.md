@@ -28,6 +28,17 @@
   <img src="docs/assets/inknote-live-preview.png" alt="InkNote live preview with document outline" width="1000" />
 </p>
 
+## What's new in this fork
+
+Compared with upstream [likehao19/InkNote](https://github.com/likehao19/InkNote), this patched build adds:
+
+- **Browser-style document tabs** — keep as many documents open as you like, switch from the tab bar, start from a new-tab page (with a **+** button), and close with × or a middle click. Unsaved changes show as a dot, and the same file never opens in two tabs.
+- **Drag & drop to edit** — drop one or many `.md` files anywhere on the window and start editing right away.
+- **Recent files by edit time** — the recent list is ordered by last modification instead of open order, and refreshes as files change on disk.
+- **Leaner memory** — KaTeX loads only when a document actually contains formulas, joining the already lazy-loaded Mermaid and export pipeline.
+- **Editor fixes** — the scroll position is kept when switching into editing, blank lines survive live preview, and the outline stays in sync with legacy encodings (GBK, UTF-16, and more).
+- **Polished app icon** — the dock icon now follows the standard icon-grid margins on every platform.
+
 ## Markdown files, without the Markdown friction
 
 InkNote keeps every document as a standard local Markdown file while giving you a polished writing surface. Formatting is rendered as you type, complex blocks can be edited in place, and the complete source is always one command away.
@@ -69,7 +80,8 @@ InkNote keeps every document as a standard local Markdown file while giving you 
 ### Organize and find
 
 - Multiple workspace folders, persistent file-tree state, and file operations.
-- Document outline, recent files, and quick open.
+- Browser-style document tabs: a new-tab start page, unsaved-change dots, and middle-click to close.
+- Document outline, recent files sorted by last edit time, and quick open.
 - Find and replace in the current document.
 - Workspace-wide filename and content search with result navigation.
 
@@ -78,7 +90,7 @@ InkNote keeps every document as a standard local Markdown file while giving you 
 - Export complete documents to standalone HTML or PDF.
 - Light, dark, and system UI appearance.
 - GitHub, Vue, and Minimal Markdown themes, plus custom CSS.
-- Markdown file associations, drag-and-drop opening, and in-app update checks.
+- Markdown file associations, drag-and-drop opening (drop one or many files to edit them right away), and in-app update checks.
 - English and Simplified Chinese application interface.
 
 ## Download
@@ -91,7 +103,7 @@ InkNote keeps every document as a standard local Markdown file while giving you 
 | Linux | [AppImage](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.AppImage) · [DEB](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.deb) · [RPM](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.rpm) | x86_64 |
 | Linux | [AppImage](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.AppImage) · [DEB](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.deb) · [RPM](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.rpm) | ARM64 / aarch64 |
 
-This is a patched fork build (multi-window opening and more); release notes and older builds are on [GitHub Releases](https://github.com/UniPeacher/InkNote/releases).
+This is a patched fork build (browser-style tabs, drag-and-drop opening, edit-time recent sorting, and more); release notes and older builds are on [GitHub Releases](https://github.com/UniPeacher/InkNote/releases).
 
 ## Installation
 

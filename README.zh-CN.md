@@ -28,6 +28,17 @@
   <img src="docs/assets/inknote-live-preview.png" alt="墨笺实时预览与文档大纲" width="1000" />
 </p>
 
+## 本 fork 的改进
+
+相比上游 [likehao19/InkNote](https://github.com/likehao19/InkNote),本修改版新增:
+
+- **浏览器式文档标签页**——想开几篇就开几篇,顶栏常驻标签栏,带"新标签页"起始页和 **+** 按钮,未保存更改显示圆点,中键或 × 关闭;同一文件不会重复开标签。
+- **拖放即编辑**——把一个或多个 `.md` 文件拖进窗口任意位置,立即直接编辑。
+- **最近文件按编辑时间排序**——最近列表按最后修改时间排列,文件在磁盘上变动时自动刷新。
+- **更省内存**——KaTeX 只在文档真的包含公式时才加载,与 Mermaid、导出管线一样按需加载。
+- **编辑体验修复**——切换到编辑时保持滚动位置、实时预览保留空行、大纲与旧编码文件(GBK、UTF-16 等)保持同步。
+- **规范的应用图标**——各平台 Dock 图标遵循标准边距。
+
 ## 保留 Markdown 文件，减少 Markdown 的干扰
 
 InkNote 始终以标准 Markdown 文件保存文档，同时提供接近普通文档编辑器的写作体验。输入时直接看到排版结果，复杂内容块可以原位编辑，需要时也能随时切换到完整源码。
@@ -69,7 +80,8 @@ InkNote 始终以标准 Markdown 文件保存文档，同时提供接近普通�
 ### 组织与检索
 
 - 多工作区目录、文件树状态保留以及常用文件操作。
-- 文档大纲、最近文件和快速打开。
+- 浏览器式文档标签页：新标签页起始页、未保存更改以圆点提示，中键或 × 关闭。
+- 文档大纲、最近文件（按编辑时间排序）和快速打开。
 - 当前文档查找与替换。
 - 跨工作区检索文件名和文件内容，并可直接跳转到结果。
 
@@ -78,7 +90,7 @@ InkNote 始终以标准 Markdown 文件保存文档，同时提供接近普通�
 - 将完整文档导出为独立 HTML 或 PDF。
 - 亮色、暗色和跟随系统的界面外观。
 - GitHub、Vue、极简 Markdown 主题，以及自定义 CSS。
-- Markdown 文件关联、拖放打开和应用内更新检查。
+- Markdown 文件关联、拖放打开（可一次拖入多个文件直接编辑）和应用内更新检查。
 - 应用界面支持简体中文和英文。
 
 ## 下载
@@ -91,7 +103,7 @@ InkNote 始终以标准 Markdown 文件保存文档，同时提供接近普通�
 | Linux | [AppImage](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.AppImage) · [DEB](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.deb) · [RPM](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.rpm) | x86_64 |
 | Linux | [AppImage](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.AppImage) · [DEB](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.deb) · [RPM](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.rpm) | ARM64 / aarch64 |
 
-本仓库为修改版 fork（多窗口打开等改进）；更新说明和历史版本可在 [GitHub Releases](https://github.com/UniPeacher/InkNote/releases) 查看。
+本仓库为修改版 fork（浏览器式标签页、拖放直接编辑、最近文件按编辑时间排序等改进）；更新说明和历史版本可在 [GitHub Releases](https://github.com/UniPeacher/InkNote/releases) 查看。
 
 ## 安装
 

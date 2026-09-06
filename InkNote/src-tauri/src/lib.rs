@@ -412,6 +412,21 @@ fn read_file(path: String) -> Result<String, String> {
     read_text_file(path).map(|file| file.content)
 }
 
+/// 批量取文件修改时间（Unix 毫秒）。文件不存在或无法读取时对应位置为 null。
+#[tauri::command]
+fn file_mtimes(paths: Vec<String>) -> Vec<Option<u64>> {
+    paths
+        .into_iter()
+        .map(|path| {
+            std::fs::metadata(&path)
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis() as u64)
+        })
+        .collect()
+}
+
 #[tauri::command]
 fn write_file(path: String, content: String) -> Result<(), String> {
     write_file_safely(Path::new(&path), content.as_bytes())
@@ -1136,6 +1151,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             read_file,
+            file_mtimes,
             write_text_file,
             write_file,
             write_binary,

@@ -43,6 +43,11 @@ export function readTextFile(path: string): Promise<TextFileContent> {
   return invokeLocalized("read_text_file", { path });
 }
 
+/** 批量取文件修改时间（Unix 毫秒），读不到的位置为 null */
+export function fileMtimes(paths: string[]): Promise<Array<number | null>> {
+  return invoke("file_mtimes", { paths });
+}
+
 export async function readFile(path: string): Promise<string> {
   return (await readTextFile(path)).content;
 }

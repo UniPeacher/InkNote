@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { Text } from "@codemirror/state";
 import { createEditor, type EditorAction, type EditorMode } from "../editor";
 import { applyCustomCssToHost, removeCustomCssFromHost } from "../lib/customTheme";
+import { setPendingImagesOwner } from "../lib/pendingImages";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import { modShortcut, redoShortcut } from "../lib/shortcuts";
 import type { Locale } from "../lib/i18n";
@@ -19,6 +20,8 @@ export interface EditorRef {
 
 interface Props {
   locale: Locale;
+  /** 所属标签 id：未落盘图片按文档归属隔离 */
+  docId: string;
   value: string;
   mode: EditorMode;
   filePath: string | null;
@@ -38,6 +41,7 @@ interface Props {
 const Editor = forwardRef<EditorRef, Props>(function Editor(
   {
     locale,
+    docId,
     value,
     mode,
     filePath,
@@ -57,6 +61,9 @@ const Editor = forwardRef<EditorRef, Props>(function Editor(
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<ReturnType<typeof createEditor> | null>(null);
+  // 渲染期同步归属：装饰构建（含图片 Widget 的 blob URL 查询）可能早于任何
+  // effect，归属必须先切到位，粘贴的未落盘图片才不会记到别的标签头上。
+  setPendingImagesOwner(docId);
   const onChangeRef = useRef(onChange);
   const onModeRef = useRef(onModeChange);
   const onCursorLineRef = useRef(onCursorLine);

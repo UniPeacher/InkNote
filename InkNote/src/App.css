@@ -1095,9 +1095,104 @@ html[data-theme="dark"] .file-tree .tree-filter-highlight {
    编辑器 — Typora 式居中排版
    ============================================================ */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg-editor); position: relative; }
+
+/* 浏览器式标签栏 */
+.tab-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 10px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-toolbar);
+  scrollbar-width: thin;
+}
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  min-width: 0;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+}
+.tab:hover { background: var(--bg-hover); color: var(--fg); }
+.tab.active {
+  background: var(--bg-editor);
+  border-color: var(--border);
+  color: var(--fg);
+}
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.tab-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.tab-close:hover { background: var(--bg-active); color: var(--fg); }
+.tab-close .lucide-x { display: none; }
+.tab:hover .tab-close .lucide-x,
+.tab-close:focus-visible .lucide-x { display: block; }
+.tab:hover .tab-dirty-dot { display: none; }
+.tab-dirty-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.tab-new {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: 0 2px 4px 4px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.tab-new:hover { background: var(--bg-hover); color: var(--fg); }
+.tab-new:active { background: var(--bg-active); }
+.tab-new:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .document-access-control {
   position: absolute;
-  top: 12px;
+  /* 标签栏已常驻顶部，悬浮按钮下移避免遮挡 */
+  top: 46px;
   right: 12px;
   z-index: 12;
   width: 32px;
@@ -2827,9 +2922,10 @@ html.platform-mac .table-size-picker { border-radius: 10px; }
 }
 
 .welcome-panel {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
+  /* 普通流式布局排在常驻标签栏下方；absolute + inset:0 会把标签栏整个盖住 */
+  position: relative;
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;

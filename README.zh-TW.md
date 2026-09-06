@@ -28,6 +28,17 @@
   <img src="docs/assets/inknote-live-preview.png" alt="墨箋即時預覽與文件大綱" width="1000" />
 </p>
 
+## 本 fork 的改進
+
+相比上游 [likehao19/InkNote](https://github.com/likehao19/InkNote),本修改版新增:
+
+- **瀏覽器式文件分頁**——想開幾篇就開幾篇,頂欄常駐分頁欄,帶「新分頁」起始頁和 **+** 按鈕,未儲存變更顯示圓點,中鍵或 × 關閉;同一檔案不會重複開分頁。
+- **拖放即編輯**——把一個或多個 `.md` 檔案拖進視窗任意位置,立即直接編輯。
+- **最近檔案依編輯時間排序**——最近清單按最後修改時間排列,檔案在磁碟上變動時自動重新整理。
+- **更省記憶體**——KaTeX 只在文件真的包含公式時才載入,與 Mermaid、匯出管線一樣按需載入。
+- **編輯體驗修正**——切換到編輯時保持捲動位置、即時預覽保留空行、大綱與舊編碼檔案(GBK、UTF-16 等)保持同步。
+- **規範的應用程式圖示**——各平台 Dock 圖示遵循標準邊距。
+
 ## 保留 Markdown 檔案，減少 Markdown 的干擾
 
 InkNote 始終以標準 Markdown 檔案儲存文件，同時提供接近一般文件編輯器的撰寫體驗。輸入時直接看到排版結果，複雜內容區塊可就地編輯，需要時也能隨時切換到完整原始碼。
@@ -69,7 +80,8 @@ InkNote 始終以標準 Markdown 檔案儲存文件，同時提供接近一般�
 ### 整理與搜尋
 
 - 多個工作區資料夾、檔案樹狀態保存及常用檔案操作。
-- 文件大綱、最近檔案與快速開啟。
+- 瀏覽器式文件分頁：新分頁起始頁、未儲存變更以圓點提示，中鍵或 × 關閉。
+- 文件大綱、最近檔案（依編輯時間排序）與快速開啟。
 - 目前文件的尋找與取代。
 - 跨工作區搜尋檔名與內容，並直接跳至結果。
 
@@ -78,7 +90,7 @@ InkNote 始終以標準 Markdown 檔案儲存文件，同時提供接近一般�
 - 將完整文件匯出為獨立 HTML 或 PDF。
 - 淺色、深色與跟隨系統的介面外觀。
 - GitHub、Vue、極簡 Markdown 主題，以及自訂 CSS。
-- Markdown 檔案關聯、拖放開啟與應用程式內更新檢查。
+- Markdown 檔案關聯、拖放開啟（可一次拖入多個檔案直接編輯）與應用程式內更新檢查。
 - 應用程式介面支援簡體中文與英文。
 
 ## 下載
@@ -91,7 +103,7 @@ InkNote 始終以標準 Markdown 檔案儲存文件，同時提供接近一般�
 | Linux | [AppImage](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.AppImage) · [DEB](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.deb) · [RPM](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.rpm) | x86_64 |
 | Linux | [AppImage](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.AppImage) · [DEB](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.deb) · [RPM](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.rpm) | ARM64 / aarch64 |
 
-版本說明與舊版可在 [GitHub Releases](https://github.com/likehao19/InkNote/releases) 查看。
+本倉庫為修改版 fork（瀏覽器式分頁、拖放直接編輯、最近檔案依編輯時間排序等改進）；版本說明與歷史版本可在 [GitHub Releases](https://github.com/UniPeacher/InkNote/releases) 查看。
 
 ## 安裝
 

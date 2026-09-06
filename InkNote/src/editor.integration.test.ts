@@ -99,7 +99,7 @@ describe("Markdown 所见即所得预览", () => {
     expect(parent.querySelector<HTMLImageElement>(".md-image-widget img")?.title).toBe("Logo title");
   });
 
-  it("renders the bundled inline and block math instead of dollar source", () => {
+  it("renders the bundled inline and block math instead of dollar source", async () => {
     const math = [
       "行内公式：质能方程 $E = mc^2$，勾股定理 $a^2 + b^2 = c^2$。",
       "",
@@ -109,14 +109,17 @@ describe("Markdown 所见即所得预览", () => {
     ].join("\n");
     const { parent } = mount(math);
 
-    expect(parent.querySelectorAll(".md-math-inline .katex")).toHaveLength(2);
-    const block = parent.querySelector<HTMLElement>(".md-math-block");
-    expect(block).not.toBeNull();
-    expect(block?.innerHTML).toContain("class=\"katex");
-    expect(parent.textContent).not.toContain("$$");
+    // KaTeX 按需加载：首帧先显示源码占位，模块到达后重绘
+    await vi.waitFor(() => {
+      expect(parent.querySelectorAll(".md-math-inline .katex")).toHaveLength(2);
+      const block = parent.querySelector<HTMLElement>(".md-math-block");
+      expect(block?.innerHTML).toContain("class=\"katex");
+      expect(parent.textContent).not.toContain("$$");
+    });
+    expect(parent.querySelector(".md-math-block")).not.toBeNull();
   });
 
-  it("keeps consecutive block formulas rendered when the editor selection enters them", () => {
+  it("keeps consecutive block formulas rendered when the editor selection enters them", async () => {
     const math = [
       "$$",
       "\\int_{-\\infty}^{\\infty} e^{-x^2} \\, dx = \\sqrt{\\pi}",
@@ -130,17 +133,20 @@ describe("Markdown 所见即所得预览", () => {
       "$$",
     ].join("\n");
     const { parent, handle } = mount(math);
-    const assertRendered = () => {
-      expect(parent.querySelectorAll(".md-math-block")).toHaveLength(2);
-      expect(parent.querySelectorAll(".md-math-empty")).toHaveLength(0);
-      expect(parent.textContent).not.toContain("$$");
+    const assertRendered = async () => {
+      // KaTeX 懒加载完成后重绘；此后再次断言都是同步生效
+      await vi.waitFor(() => {
+        expect(parent.querySelectorAll(".md-math-block")).toHaveLength(2);
+        expect(parent.querySelectorAll(".md-math-empty")).toHaveLength(0);
+        expect(parent.textContent).not.toContain("$$");
+      });
     };
 
-    assertRendered();
+    await assertRendered();
     handle.view.dispatch({ selection: { anchor: math.indexOf("\\int") + 2 } });
-    assertRendered();
+    await assertRendered();
     handle.view.dispatch({ selection: { anchor: math.indexOf("\\begin") + 2 } });
-    assertRendered();
+    await assertRendered();
   });
 
   it("exits a code block when Enter is pressed on its trailing blank line", async () => {

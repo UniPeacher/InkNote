@@ -28,6 +28,17 @@
   <img src="docs/assets/inknote-live-preview.png" alt="InkNote のライブプレビューと文書アウトライン" width="1000" />
 </p>
 
+## この fork の新機能
+
+上流 [likehao19/InkNote](https://github.com/likehao19/InkNote) に対する修正版の追加要素:
+
+- **ブラウザー式の文書タブ** — タブはいくつでも開けます。新規タブのスタートページと **+** ボタン付きのタブバー、未保存の変更はドットで表示、中クリックや × で閉じます。同じファイルが 2 つのタブで開くことはありません。
+- **ドラッグ＆ドロップで即編集** — `.md` ファイルを 1 つでも複数でもウィンドウにドロップすれば、そのまま編集を始められます。
+- **最近使ったファイルは編集時刻順** — 最近リストは開いた順ではなく最終更新時刻順に並び、ディスク上の変更で自動的に更新されます。
+- **さらに軽いメモリ使用量** — KaTeX は文書に数式が含まれるときだけ読み込みます（Mermaid やエクスポートも既に遅延読み込み）。
+- **編集体験の修正** — 編集への切り替えでスクロール位置を保持、ライブプレビューで空行を保持、アウトラインと旧エンコーディング（GBK、UTF-16 など）の同期。
+- **整えたアプリアイコン** — 全プラットフォームで標準のアイコングリッド余白に準拠。
+
 ## Markdown ファイルはそのまま、記法のわずらわしさは少なく
 
 InkNote は文書を標準のローカル Markdown ファイルとして保存しながら、一般的な文書エディターに近い執筆体験を提供します。入力中に整形結果を確認でき、複雑なブロックはその場で編集でき、必要なときはいつでも完全なソースへ切り替えられます。
@@ -69,7 +80,8 @@ InkNote は文書を標準のローカル Markdown ファイルとして保存�
 ### 整理と検索
 
 - 複数のワークスペースフォルダー、ファイルツリー状態の保持、ファイル操作。
-- 文書アウトライン、最近使ったファイル、クイックオープン。
+- ブラウザー式の文書タブ：新規タブのスタートページ、未保存の変更はドットで表示、中クリックや × で閉じる。
+- 文書アウトライン、最終編集時刻で並び替えた最近使ったファイル、クイックオープン。
 - 現在の文書内での検索と置換。
 - ファイル名と内容を対象にしたワークスペース横断検索と結果への移動。
 
@@ -78,7 +90,7 @@ InkNote は文書を標準のローカル Markdown ファイルとして保存�
 - 文書全体を単体の HTML または PDF としてエクスポート。
 - ライト、ダーク、システム連動の外観。
 - GitHub、Vue、Minimal の Markdown テーマとカスタム CSS。
-- Markdown ファイル関連付け、ドラッグ＆ドロップ、アプリ内アップデート確認。
+- Markdown ファイル関連付け、ドラッグ＆ドロップで開く（複数ファイルを一度にドロップしてすぐ編集）、アプリ内アップデート確認。
 - アプリ UI は英語と簡体字中国語に対応。
 
 ## ダウンロード
@@ -91,7 +103,7 @@ InkNote は文書を標準のローカル Markdown ファイルとして保存�
 | Linux | [AppImage](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.AppImage) · [DEB](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.deb) · [RPM](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-x86_64.rpm) | x86_64 |
 | Linux | [AppImage](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.AppImage) · [DEB](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.deb) · [RPM](https://github.com/likehao19/InkNote/releases/latest/download/InkNote-Linux-arm64.rpm) | ARM64 / aarch64 |
 
-リリースノートと過去のビルドは [GitHub Releases](https://github.com/likehao19/InkNote/releases) で確認できます。
+本リポジトリは修正版 fork です（ブラウザー式タブ、ドラッグ＆ドロップ編集、最近使ったファイルの編集時刻ソートなどの改善）。リリースノートと過去のビルドは [GitHub Releases](https://github.com/UniPeacher/InkNote/releases) で確認できます。
 
 ## インストール
 

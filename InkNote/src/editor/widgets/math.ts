@@ -1,5 +1,4 @@
-import { WidgetType } from "@codemirror/view";
-import katex from "katex";
+import { EditorView, WidgetType } from "@codemirror/view";
 import { bindBlockBoundaryCursor, bindBlockClickEdit, stampBlockRange } from "./blockRange";
 import {
   attachSourceEditing,
@@ -9,16 +8,46 @@ import {
 } from "./editableSource";
 import { getLocale, t } from "../../lib/i18n";
 
+type KatexApi = (typeof import("katex"))["default"];
+
+/**
+ * KaTeX 按需加载：文档里真的出现公式才拉取模块。
+ * 普通笔记（无公式）启动时不再解析这 ~300KB 的 JS，也不占常驻堆内存。
+ */
+let katex: KatexApi | null = null;
+let katexPromise: Promise<KatexApi> | null = null;
+
+function ensureKatex(): Promise<KatexApi> {
+  katexPromise ??= import("katex").then((module) => {
+    katex = module.default;
+    return katex;
+  });
+  return katexPromise;
+}
+
 function renderMath(target: HTMLElement, tex: string, display: boolean) {
-  try {
-    // render() 会在部分 WebView / 测试文档被判定为 quirks mode 时直接拒绝渲染；
-    // renderToString() 不依赖宿主文档模式，生成的结果与标准页面一致。
-    target.innerHTML = katex.renderToString(tex, {
-      throwOnError: false,
-      displayMode: display,
-    });
-  } catch {
-    target.textContent = display ? `$$${tex}$$` : `$${tex}$`;
+  const fallback = display ? `$$${tex}$$` : `$${tex}$`;
+  if (!katex) {
+    // 模块加载完成前先用源码占位，加载完成后重绘当前元素。
+    // 元素若已被销毁（滚出视口/切换文档），对游离节点赋值无副作用。
+    if (tex.trim()) {
+      target.textContent = fallback;
+      void ensureKatex().then(() => {
+        renderMath(target, tex, display);
+        EditorView.findFromDOM(target)?.requestMeasure();
+      });
+    }
+  } else {
+    try {
+      // render() 会在部分 WebView / 测试文档被判定为 quirks mode 时直接拒绝渲染；
+      // renderToString() 不依赖宿主文档模式，生成的结果与标准页面一致。
+      target.innerHTML = katex.renderToString(tex, {
+        throwOnError: false,
+        displayMode: display,
+      });
+    } catch {
+      target.textContent = fallback;
+    }
   }
   if (!tex.trim()) {
     target.textContent = display ? t(getLocale(), "editor.math.empty") : "$$";
