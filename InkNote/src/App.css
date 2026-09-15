@@ -66,7 +66,7 @@
   --code-bg: #2d2d30;
   --mark-bg: #5a5320;
   --mark-fg: #e4e4e4;
-  --selection: rgba(77, 163, 255, 0.28);
+  --selection: rgba(77, 163, 255, 0.35);
   --syntax-keyword: #f47067;
   --syntax-string: #a5d6ff;
   --syntax-number: #79c0ff;
@@ -1252,7 +1252,10 @@ html[data-theme="dark"][data-md-theme="minimal"] .editor-host {
   border-left-color: color-mix(in srgb, var(--fg) 42%, transparent);
   border-left-width: 1.5px;
 }
-.editor-host .cm-selectionBackground,
+/* 覆盖 CodeMirror baseTheme 的选区色（聚焦态是 5 个类的 #d7d4f0 淡紫），
+   必须用同等或更高的特异性，否则回落到淡紫色导致暗色文字看不清 */
+.editor-host .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground,
+.editor-host .cm-editor .cm-selectionLayer .cm-selectionBackground,
 .editor-host .cm-content ::selection { background: var(--selection); }
 html:not([data-theme="dark"]) .md-codeblock-widget code::selection {
   background: rgba(9, 105, 218, 0.11);
@@ -1683,13 +1686,12 @@ html[data-md-theme="vue"] .md-codeblock-widget code {
   gap: 12px;
   height: var(--statusbar-height);
   flex-shrink: 0;
-  background: var(--accent);
-  color: #ffffff;
+  background: var(--bg-toolbar);
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border);
   padding: 0 10px;
   font-size: 11.5px;
 }
-html.platform-mac .statusbar { background: var(--bg-toolbar); color: var(--fg-muted); border-top: 1px solid var(--border); }
-html.platform-mac[data-theme="dark"] .statusbar { background: var(--bg-toolbar); }
 .status-spacer { flex: 1; }
 .status-path { max-width: 40vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.85; }
 

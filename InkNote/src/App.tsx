@@ -1,7 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { Eye, Pencil } from "lucide-react";
 import type { EditorRef } from "./components/Editor";
@@ -10,7 +9,6 @@ import Sidebar, { type SidebarTab } from "./components/Sidebar";
 import { SidebarPanel } from "./components/SidebarPanel";
 import StatusBar from "./components/StatusBar";
 import Toast from "./components/Toast";
-import type { UpdateProgressState } from "./components/UpdateProgress";
 import WelcomePanel from "./components/WelcomePanel";
 import * as api from "./lib/tauri";
 import { initPlatform } from "./lib/platform";
@@ -110,7 +108,6 @@ import type { EditorAction } from "./editor";
 import { setTableInsertRequestHandler } from "./editor/tableInsertBridge";
 import { useToast } from "./lib/useToast";
 import { countWords, estimateReadMinutes } from "./lib/wordCount";
-import { nextUpdatePercent } from "./lib/updateProgress";
 import {
   clearPendingImages,
   commitPendingImages,
@@ -185,13 +182,9 @@ export default function App() {
     pendingImages: PendingImageSnapshot[];
   } | null>(null);
   const { message: toastMessage, toastKind, show, showSuccess, showError } = useToast();
-  const updateRunningRef = useRef(false);
   const updateCheckRunningRef = useRef(false);
-  const automaticUpdateCheckStartedRef = useRef(false);
-  const availableUpdateRef = useRef<Update | null>(null);
   const closingRef = useRef(false);
   const fileLoadRequestRef = useRef(0);
-  const [updateProgress, setUpdateProgress] = useState<UpdateProgressState | null>(null);
   const confirmResolveRef = useRef<((v: boolean) => void) | null>(null);
   const linkResolveRef = useRef<((v: { text: string; url: string } | null) => void) | null>(null);
   const imageResolveRef = useRef<((v: { alt: string; path: string } | null) => void) | null>(null);
@@ -960,164 +953,33 @@ export default function App() {
     if (next) show(t(locale, "toast.typewriterHint"));
   }, [typewriterMode, toggleTypewriterMode, show, locale]);
 
-  const checkForUpdates = useCallback(async (announce: boolean) => {
-    if (updateRunningRef.current || updateCheckRunningRef.current) {
-      if (announce) show(t(locale, "update.inProgress"));
-      return;
-    }
-    if (availableUpdateRef.current) {
-      const version = availableUpdateRef.current.version;
-      setUpdateProgress({ phase: "available", version, percent: 0, downloaded: 0, total: 0 });
-      if (announce) show(t(locale, "update.ready", { v: version }));
+  const checkForUpdates = useCallback(async () => {
+    if (updateCheckRunningRef.current) {
+      show(t(locale, "update.inProgress"));
       return;
     }
 
     updateCheckRunningRef.current = true;
     try {
       if (!(await api.supportsInAppUpdate())) {
-        setUpdateProgress(null);
-        if (announce) show(t(locale, "update.unsupportedPackage"));
+        show(t(locale, "update.unsupportedPackage"));
         return;
-      }
-      if (announce) {
-        setUpdateProgress({ phase: "checking", percent: 0, downloaded: 0, total: 0 });
       }
       const update = await check();
       if (!update) {
-        setUpdateProgress(null);
-        if (announce) showSuccess(t(locale, "update.latest"));
+        showSuccess(t(locale, "update.latest"));
         return;
       }
-      availableUpdateRef.current = update;
-      setUpdateProgress({
-        phase: "available",
-        version: update.version,
-        percent: 0,
-        downloaded: 0,
-        total: 0,
-      });
-      if (announce) show(t(locale, "update.ready", { v: update.version }));
+      show(t(locale, "update.ready", { v: update.version }));
     } catch (error) {
-      setUpdateProgress(null);
-      if (announce) showError(error);
-      else console.warn("Automatic update check failed", error);
+      showError(error);
     } finally {
       updateCheckRunningRef.current = false;
     }
   }, [locale, show, showError, showSuccess]);
 
   const handleCheckUpdates = useCallback(async () => {
-    await checkForUpdates(true);
-  }, [checkForUpdates]);
-
-  const handleInstallUpdate = useCallback(async () => {
-    if (updateRunningRef.current) {
-      show(t(locale, "update.inProgress"));
-      return;
-    }
-    const update = availableUpdateRef.current;
-    if (!update) {
-      await checkForUpdates(true);
-      return;
-    }
-
-    updateRunningRef.current = true;
-    let installed = false;
-    try {
-      const activeTab = getActive();
-      if (activeTab?.dirty && !(await saveTab(activeTab.id))) {
-        return;
-      }
-      const latestTab = useTabsStore.getState().getActive();
-      if (latestTab?.dirty) {
-        const savedAgain = latestTab.path
-          ? await saveExistingTab(latestTab)
-          : Boolean(await saveTab(latestTab.id));
-        if (!savedAgain || useTabsStore.getState().getActive()?.dirty) return;
-      }
-
-      let downloaded = 0;
-      let total = 0;
-      let percent = 0;
-      setUpdateProgress({
-        phase: "downloading",
-        version: update.version,
-        percent,
-        downloaded,
-        total,
-      });
-      await update.downloadAndInstall((event) => {
-        if (event.event === "Started") {
-          downloaded = 0;
-          total = event.data.contentLength ?? 0;
-          percent = 0;
-          setUpdateProgress({
-            phase: "downloading",
-            version: update.version,
-            percent,
-            downloaded,
-            total,
-          });
-        } else if (event.event === "Progress") {
-          downloaded += event.data.chunkLength;
-          percent = nextUpdatePercent(downloaded, total, percent);
-          setUpdateProgress({
-            phase: "downloading",
-            version: update.version,
-            percent,
-            downloaded,
-            total,
-          });
-        } else if (event.event === "Finished") {
-          setUpdateProgress({
-            phase: "installing",
-            version: update.version,
-            percent: 100,
-            downloaded,
-            total,
-          });
-        }
-      });
-      installed = true;
-      availableUpdateRef.current = null;
-      setUpdateProgress({
-        phase: "installing",
-        version: update.version,
-        percent: 100,
-        downloaded,
-        total,
-      });
-      showSuccess(t(locale, "update.installed"));
-      await relaunch();
-    } catch (error) {
-      setUpdateProgress(installed
-        ? null
-        : {
-            phase: "available",
-            version: update.version,
-            percent: 0,
-            downloaded: 0,
-            total: 0,
-          });
-      showError(error);
-    } finally {
-      updateRunningRef.current = false;
-    }
-  }, [checkForUpdates, getActive, locale, saveExistingTab, saveTab, show, showError, showSuccess]);
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      if (automaticUpdateCheckStartedRef.current) return;
-      automaticUpdateCheckStartedRef.current = true;
-      void checkForUpdates(false);
-    }, 8_000);
-    const interval = window.setInterval(() => {
-      void checkForUpdates(false);
-    }, 6 * 60 * 60 * 1000);
-    return () => {
-      window.clearTimeout(timeout);
-      window.clearInterval(interval);
-    };
+    await checkForUpdates();
   }, [checkForUpdates]);
 
   // 初始化 effect 里用到的回调放进 ref：直接进依赖数组的话，saveTab 依赖 tabs，
@@ -1808,7 +1670,6 @@ export default function App() {
         sidebarTab={sidebarTab}
         editorMode={active?.mode ?? "preview"}
         documentEditable={documentEditable}
-        updateState={updateProgress}
         onOpen={openFile}
         onOpenFolder={openFolder}
         onNewFile={handleNewFile}
@@ -1827,7 +1688,6 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
         onCheckUpdates={() => void handleCheckUpdates()}
-        onInstallUpdate={() => void handleInstallUpdate()}
         onOpenAbout={() => setAboutOpen(true)}
         onGlobalSearch={() => setGlobalSearchOpen(true)}
         onQuickOpen={() => setQuickOpenOpen(true)}

@@ -2,6 +2,7 @@ use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use regex::RegexBuilder;
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
@@ -17,7 +18,6 @@ use std::{
     },
     time::Duration,
 };
-#[cfg(any(windows, target_os = "macos"))]
 use tauri::{webview::PageLoadEvent, WebviewUrl, WebviewWindowBuilder};
 #[cfg(windows)]
 use webview2_com::{Microsoft::Web::WebView2::Win32::ICoreWebView2_7, PrintToPdfCompletedHandler};
@@ -47,11 +47,23 @@ impl OpenFileState {
 
 struct AppState {
     open_file: Mutex<OpenFileState>,
-    watcher: Mutex<Option<RecommendedWatcher>>,
-    watched_path: Mutex<Option<String>>,
-    dir_watcher: Mutex<Option<RecommendedWatcher>>,
-    watched_dirs: Mutex<Vec<String>>,
+    // 每个新窗口的启动文件：label -> 待打开的 md 路径，由该窗口的 get_startup_file 领取
+    window_files: Mutex<HashMap<String, String>>,
+    file_watchers: Mutex<HashMap<String, FileWatchEntry>>,
+    dir_watchers: Mutex<HashMap<String, DirWatchEntry>>,
 }
+
+struct FileWatchEntry {
+    watcher: Option<RecommendedWatcher>,
+    path: Option<String>,
+}
+
+struct DirWatchEntry {
+    watcher: Option<RecommendedWatcher>,
+    paths: Vec<String>,
+}
+
+static NEXT_WINDOW_ID: FileAtomicU64 = FileAtomicU64::new(1);
 
 static NEXT_TEMP_FILE_ID: FileAtomicU64 = FileAtomicU64::new(1);
 
@@ -524,7 +536,10 @@ fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
 }
 
 #[tauri::command]
-fn get_startup_file(state: tauri::State<AppState>) -> Option<String> {
+fn get_startup_file(state: tauri::State<AppState>, window: tauri::WebviewWindow) -> Option<String> {
+    if let Some(path) = state.window_files.lock().unwrap().remove(window.label()) {
+        return Some(path);
+    }
     state.open_file.lock().unwrap().register_frontend()
 }
 
@@ -803,21 +818,26 @@ fn save_app_settings(app: tauri::AppHandle, settings: serde_json::Value) -> Resu
 fn watch_file(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
+    window: tauri::WebviewWindow,
     path: String,
 ) -> Result<(), String> {
+    let label = window.label().to_string();
     {
-        let watched = state.watched_path.lock().unwrap();
-        if watched.as_deref() == Some(path.as_str()) {
-            return Ok(());
+        let watchers = state.file_watchers.lock().unwrap();
+        if let Some(entry) = watchers.get(&label) {
+            if entry.path.as_deref() == Some(path.as_str()) {
+                return Ok(());
+            }
         }
     }
 
-    let mut watcher_guard = state.watcher.lock().unwrap();
-    *watcher_guard = None;
+    let mut watchers = state.file_watchers.lock().unwrap();
+    watchers.remove(&label);
 
     let emit_path = path.clone();
     let target_path = PathBuf::from(&path);
     let app_handle = app.clone();
+    let target_label = label.clone();
     let mut watcher = RecommendedWatcher::new(
         move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
@@ -829,7 +849,11 @@ fn watch_file(
                         | EventKind::Any
                 );
                 if relevant && event.paths.iter().any(|changed| changed == &target_path) {
-                    let _ = app_handle.emit("file-changed", emit_path.clone());
+                    let _ = app_handle.emit_to(
+                        target_label.as_str(),
+                        "file-changed",
+                        emit_path.clone(),
+                    );
                 }
             }
         },
@@ -844,34 +868,43 @@ fn watch_file(
         .watch(watch_target, RecursiveMode::NonRecursive)
         .map_err(|e| e.to_string())?;
 
-    *watcher_guard = Some(watcher);
-    *state.watched_path.lock().unwrap() = Some(path);
+    watchers.insert(
+        label,
+        FileWatchEntry {
+            watcher: Some(watcher),
+            path: Some(path),
+        },
+    );
     Ok(())
 }
 
 #[tauri::command]
-fn unwatch_file(state: tauri::State<AppState>) {
-    *state.watcher.lock().unwrap() = None;
-    *state.watched_path.lock().unwrap() = None;
+fn unwatch_file(state: tauri::State<AppState>, window: tauri::WebviewWindow) {
+    state.file_watchers.lock().unwrap().remove(window.label());
 }
 
 #[tauri::command]
 fn watch_dirs(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
+    window: tauri::WebviewWindow,
     paths: Vec<String>,
 ) -> Result<(), String> {
+    let label = window.label().to_string();
     {
-        let watched = state.watched_dirs.lock().unwrap();
-        if *watched == paths {
-            return Ok(());
+        let watchers = state.dir_watchers.lock().unwrap();
+        if let Some(entry) = watchers.get(&label) {
+            if entry.paths == paths {
+                return Ok(());
+            }
         }
     }
 
-    let mut watcher_guard = state.dir_watcher.lock().unwrap();
-    *watcher_guard = None;
+    let mut watchers = state.dir_watchers.lock().unwrap();
+    watchers.remove(&label);
 
     let app_handle = app.clone();
+    let target_label = label.clone();
     let mut watcher = RecommendedWatcher::new(
         move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
@@ -888,7 +921,7 @@ fn watch_dirs(
                         .first()
                         .map(|path| path.to_string_lossy().to_string())
                         .unwrap_or_default();
-                    let _ = app_handle.emit("dir-changed", changed);
+                    let _ = app_handle.emit_to(target_label.as_str(), "dir-changed", changed);
                 }
             }
         },
@@ -902,15 +935,19 @@ fn watch_dirs(
             .map_err(|e| e.to_string())?;
     }
 
-    *watcher_guard = Some(watcher);
-    *state.watched_dirs.lock().unwrap() = paths;
+    watchers.insert(
+        label,
+        DirWatchEntry {
+            watcher: Some(watcher),
+            paths,
+        },
+    );
     Ok(())
 }
 
 #[tauri::command]
-fn unwatch_dir(state: tauri::State<AppState>) {
-    *state.dir_watcher.lock().unwrap() = None;
-    state.watched_dirs.lock().unwrap().clear();
+fn unwatch_dir(state: tauri::State<AppState>, window: tauri::WebviewWindow) {
+    state.dir_watchers.lock().unwrap().remove(window.label());
 }
 
 #[tauri::command]
@@ -1099,6 +1136,115 @@ fn configure_markdown_default_app() -> Result<&'static str, String> {
     Ok("configured")
 }
 
+#[cfg(windows)]
+fn force_foreground(hwnd: isize) {
+    #[link(name = "User32")]
+    extern "system" {
+        fn GetForegroundWindow() -> isize;
+        fn GetWindowThreadProcessId(hwnd: isize, lpdwprocessid: *mut u32) -> u32;
+        fn GetCurrentThreadId() -> u32;
+        fn AttachThreadInput(idattach: u32, idattachto: u32, fattach: i32) -> i32;
+        fn SetForegroundWindow(hwnd: isize) -> i32;
+        fn BringWindowToTop(hwnd: isize) -> i32;
+        fn SetFocus(hwnd: isize) -> isize;
+        fn ShowWindow(hwnd: isize, ncmdshow: i32) -> i32;
+    }
+    unsafe {
+        if hwnd == 0 {
+            return;
+        }
+        ShowWindow(hwnd, 5); // SW_SHOW
+        BringWindowToTop(hwnd);
+        let fg = GetForegroundWindow();
+        let fg_thread = GetWindowThreadProcessId(fg, std::ptr::null_mut());
+        let this_thread = GetCurrentThreadId();
+        let attached = fg_thread != 0 && fg_thread != this_thread;
+        if attached {
+            AttachThreadInput(this_thread, fg_thread, 1);
+        }
+        SetForegroundWindow(hwnd);
+        SetFocus(hwnd);
+        if attached {
+            AttachThreadInput(this_thread, fg_thread, 0);
+        }
+    }
+}
+
+/// 等窗口被前端显示后立即强制带到前台并聚焦。
+/// 窗口以隐藏方式创建（防白屏），由后端轮询可见性，不依赖前端调用。
+/// 前台抢占偶发被系统拒绝，未拿到焦点时最多重试 5 次。
+fn watch_and_foreground(window: tauri::WebviewWindow) {
+    std::thread::spawn(move || {
+        for _ in 0..100 {
+            if window.is_visible().unwrap_or(false) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        for _ in 0..5 {
+            if window.is_focused().unwrap_or(true) {
+                return;
+            }
+            #[cfg(windows)]
+            {
+                if let Ok(h) = window.hwnd() {
+                    force_foreground(h.0 as isize);
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = window.set_focus();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
+    });
+}
+
+/// 把指定窗口带到前台并聚焦（挂接前台线程输入队列绕过系统前台限制）。
+#[tauri::command]
+fn bring_to_front(window: tauri::WebviewWindow) {
+    let _ = window.show();
+    #[cfg(windows)]
+    {
+        let hwnd = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
+        force_foreground(hwnd);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window.set_focus();
+    }
+}
+
+/// 用新窗口打开一个 md 文件：先把路径挂到该窗口的启动文件上，
+/// 新窗口的前端启动时会通过 get_startup_file 领取并打开它。
+fn open_in_new_window(
+    app: &tauri::AppHandle,
+    path: String,
+) -> Result<tauri::WebviewWindow, tauri::Error> {
+    let id = NEXT_WINDOW_ID.fetch_add(1, FileOrdering::SeqCst);
+    let label = format!("main-{id}");
+    if let Some(state) = app.try_state::<AppState>() {
+        state
+            .window_files
+            .lock()
+            .unwrap()
+            .insert(label.clone(), path);
+    }
+
+    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+        .title("InkNote")
+        .inner_size(1080.0, 720.0)
+        .min_inner_size(640.0, 420.0)
+        .visible(false)
+        .decorations(false)
+        .shadow(true)
+        .drag_and_drop(true)
+        // 新窗口默认最大化；inner_size 仅作为还原窗口后的尺寸
+        .maximized(true);
+
+    builder.build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let startup_file = find_markdown_file(&std::env::args().collect::<Vec<_>>());
@@ -1113,11 +1259,21 @@ pub fn run() {
         )
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(path) = find_markdown_file(&argv) {
-                dispatch_open_file(app, path);
-            }
-            if let Some(window) = app.get_webview_window("main") {
+                // 已有实例在运行时，把新 md 文件放到新窗口里打开。
+                // 窗口以隐藏方式创建，由前端渲染完成后再 show，避免白屏；
+                // 后端轮询到窗口可见后强制带到最顶层
+                match open_in_new_window(app, path) {
+                    Ok(window) => watch_and_foreground(window),
+                    Err(_) => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            watch_and_foreground(window);
+                        }
+                    }
+                }
+            } else if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
-                let _ = window.set_focus();
+                watch_and_foreground(window);
             }
         }))
         .plugin(tauri_plugin_opener::init())
@@ -1128,10 +1284,9 @@ pub fn run() {
                 pending: startup_file,
                 frontend_ready: false,
             }),
-            watcher: Mutex::new(None),
-            watched_path: Mutex::new(None),
-            dir_watcher: Mutex::new(None),
-            watched_dirs: Mutex::new(Vec::new()),
+            window_files: Mutex::new(HashMap::new()),
+            file_watchers: Mutex::new(HashMap::new()),
+            dir_watchers: Mutex::new(HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
             read_text_file,
@@ -1159,19 +1314,45 @@ pub fn run() {
             remove_path,
             supports_in_app_update,
             configure_markdown_default_app,
-        ]);
+            bring_to_front,
+        ])
+        .setup(|app| {
+            // 冷启动的主窗口同样是隐藏创建，等前端显示后强制带到最顶层
+            if let Some(window) = app.get_webview_window("main") {
+                watch_and_foreground(window);
+            }
+            Ok(())
+        });
 
     builder
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {
-            #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = _event {
-                if let Some(url) = urls.into_iter().next() {
-                    if let Ok(path) = url.to_file_path() {
-                        dispatch_open_file(_app, path.to_string_lossy().to_string());
+            match _event {
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Opened { urls } => {
+                    if let Some(url) = urls.into_iter().next() {
+                        if let Ok(path) = url.to_file_path() {
+                            let _ = open_in_new_window(
+                                _app,
+                                path.to_string_lossy().to_string(),
+                            );
+                        }
                     }
                 }
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::Destroyed,
+                    ..
+                } => {
+                    // 窗口关闭后回收它的启动文件与监听器
+                    if let Some(state) = _app.try_state::<AppState>() {
+                        state.window_files.lock().unwrap().remove(&label);
+                        state.file_watchers.lock().unwrap().remove(&label);
+                        state.dir_watchers.lock().unwrap().remove(&label);
+                    }
+                }
+                _ => {}
             }
         });
 }

@@ -1,0 +1,61 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: ["multi-window*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: InkNote/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: InkNote/src-tauri -> target
+
+      - name: Install dependencies
+        working-directory: InkNote
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: InkNote
+        run: pnpm build
+
+      - name: Build exe
+        working-directory: InkNote/src-tauri
+        run: cargo build --release --features tauri/custom-protocol
+
+      - name: Collect exe
+        run: Copy-Item InkNote/src-tauri/target/release/inknote.exe InkNote-Windows-x64.exe
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: InkNote-Windows-x64
+          path: InkNote-Windows-x64.exe
+          if-no-files-found: error
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: patched
+          name: "Patched build (multi-window)"
+          body: "Automated build of the multi-window patched fork. Updates on every push to multi-window* branches."
+          files: InkNote-Windows-x64.exe
