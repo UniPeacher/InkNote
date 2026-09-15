@@ -4,7 +4,6 @@ import { isLinux } from "../lib/platform";
 import MenuBar from "./MenuBar";
 import { buildMenuGroups } from "./menus";
 import WindowControls from "./WindowControls";
-import UpdateProgress, { type UpdateProgressState } from "./UpdateProgress";
 import appIcon from "../../src-tauri/icons/32x32.png";
 import type { SidebarTab } from "./Sidebar";
 import type { EditorAction, EditorMode } from "../editor";
@@ -21,7 +20,6 @@ interface Props {
   sidebarTab: SidebarTab;
   editorMode: EditorMode;
   documentEditable: boolean;
-  updateState: UpdateProgressState | null;
   onOpen: () => void;
   onOpenFolder: () => void;
   onNewFile: () => void;
@@ -40,7 +38,6 @@ interface Props {
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onCheckUpdates: () => void;
-  onInstallUpdate: () => void;
   onOpenAbout: () => void;
   onGlobalSearch?: () => void;
   onQuickOpen?: () => void;
@@ -60,7 +57,6 @@ export default function Titlebar({
   sidebarTab,
   editorMode,
   documentEditable,
-  updateState,
   onOpen,
   onOpenFolder,
   onNewFile,
@@ -79,7 +75,6 @@ export default function Titlebar({
   onOpenSettings,
   onOpenShortcuts,
   onCheckUpdates,
-  onInstallUpdate,
   onOpenAbout,
   onGlobalSearch,
   onQuickOpen,
@@ -188,9 +183,7 @@ export default function Titlebar({
         <div className="titlebar-center" data-tauri-drag-region="">
           {documentTitle}
         </div>
-        <div className="titlebar-right">
-          <UpdateProgress locale={locale} state={updateState} onInstall={onInstallUpdate} />
-        </div>
+        <div className="titlebar-right" />
       </header>
     );
   }
@@ -210,7 +203,6 @@ export default function Titlebar({
       </div>
 
       <div className="titlebar-right">
-        <UpdateProgress locale={locale} state={updateState} onInstall={onInstallUpdate} />
         {!isMac && <WindowControls locale={locale} />}
       </div>
     </header>
