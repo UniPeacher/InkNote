@@ -16,6 +16,7 @@ import type { Locale } from "../lib/i18n";
 import type { MarkdownTheme } from "../lib/markdownTheme";
 import { configuredMermaid } from "../lib/mermaid";
 import { resolveAssetPath } from "../lib/paths";
+import { normalizeMathDelimiters } from "../lib/mathSyntax";
 
 const BASE_CSS = `
   :root { --doc-bg: #fcfcfd; --doc-fg: #24272d; --doc-muted: #68707c; --doc-border: #dfe3e8; --doc-accent: #3268c8; --doc-panel: #f3f5f8; --doc-mark: #fff0a8; --doc-radius: 9px; --doc-heading: -apple-system, "Segoe UI", system-ui, sans-serif; }
@@ -163,7 +164,9 @@ export async function markdownToBodyHtml(
   theme: ResolvedTheme = "light",
 ): Promise<string> {
   const processor = await buildProcessor();
-  const result = await processor.process(md);
+  // remark-math 只认美元定界符；LaTeX 原生的 `\(...\)`、`\[...\]` 必须先改写，
+  // 否则会被 CommonMark 当成转义，正文里只剩裸括号 + 生 LaTeX。
+  const result = await processor.process(normalizeMathDelimiters(md));
   return renderMermaidBlocks(String(result), theme);
 }
 

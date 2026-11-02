@@ -286,6 +286,35 @@ function buildPreviewSets(
   const coversWholeLines = (from: number, to: number) =>
     doc.lineAt(from).from === from && doc.lineAt(to).to === to;
 
+  const inCode = (from: number, to: number) => isInCode(tree, from, to);
+
+  // 公式必须在遍历语法树之前扫出来：
+  // (1) LaTeX 原生写法 `\(...\)`、`\[...\]` 会被 CommonMark 当成转义，
+  //     Lezer 只给出 Escape 节点，若不先认领，正文里就会露出 `( ... )` 和生 LaTeX；
+  // (2) 公式内部的 `_`、`*`、`\\` 也会被解析成强调 / 转义，与替换装饰重叠会
+  //     让 CodeMirror 抛 "overlapping decoration" 或把公式切成碎片。
+  // 修剪方式见遍历里的 skipMath。
+  const mathRanges = scanMath(doc, inCode, text).filter((math) => !(fm && math.from < fmEnd));
+  const mathRangesByFrom = [...mathRanges].sort((a, b) => a.from - b.from);
+
+  /** 节点是否整个落在某个公式区间内 → 交给公式装饰，不再单独加工 */
+  const insideMath = (from: number, to: number): boolean => {
+    let lo = 0;
+    let hi = mathRangesByFrom.length - 1;
+    let hit: (typeof mathRangesByFrom)[number] | null = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const range = mathRangesByFrom[mid];
+      if (range.from <= from) {
+        hit = range;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return Boolean(hit && to <= hit.to);
+  };
+
   const addLineClass = (
     lineFrom: number,
     cls: string,
@@ -324,6 +353,9 @@ function buildPreviewSets(
       // （`---` 会被解析成 HorizontalRule + SetextHeading）
       // 注意用 to <= fmEnd 判断：根节点 from 也是 0，用 from 会直接中止整棵树的遍历
       if (fm && to <= fmEnd) return false;
+
+      // 公式区间内部的一切标记（转义、下划线、强调、换行）都由公式装饰整体接管
+      if (insideMath(from, to)) return false;
 
       if (HEADINGS.has(n)) {
         // 标题上方留白：Typora 里标题与前文之间有明显间距
@@ -625,8 +657,6 @@ function buildPreviewSets(
     },
   });
 
-  const inCode = (from: number, to: number) => isInCode(tree, from, to);
-
   // `[x] 文本` 不是标准 GFM ListItem，Lezer 不会生成 Task 节点；作为编辑器
   // 兼容语法单独补装饰，保留源文件原样并复用同一套点击切换逻辑。
   for (let number = 1; number <= doc.lines; number++) {
@@ -642,19 +672,30 @@ function buildPreviewSets(
     );
   }
 
-  // 数学公式（$...$ / $$...$$）
-  for (const math of scanMath(doc, inCode, text)) {
-    if (fm && math.from < fmEnd) continue;
-    if (math.block) atomicBlocks.push({ from: math.from, to: math.to });
-    decos.push(
-      Decoration.replace({
-        widget: math.block
-          ? new BlockMathWidget(math.from, math.to, math.tex)
-          : new InlineMathWidget(math.from, math.to, math.tex),
-        block: math.block,
-        ...(math.block ? blockReveal(math.from, math.to) : null),
-      }).range(math.from, math.to),
-    );
+  // 数学公式（`$...$` / `$$...$$` / `\(...\)` / `\[...\]`）
+  for (const math of mathRanges) {
+    // 块级替换装饰必须覆盖整行；`\[ x \]` 若写在段落中间，只能退化成行内组件，
+    // 否则 CodeMirror 会把这一行从中间劈开。
+    const asBlock = math.block && coversWholeLines(math.from, math.to);
+    if (asBlock) atomicBlocks.push({ from: math.from, to: math.to });
+    if (asBlock) {
+      // 源码里定界符是否各占一行：单行 `\[ x \]` 编辑回写后仍应是单行
+      const multiline =
+        doc.sliceString(math.from + math.open.length, math.from + math.open.length + 1) === "\n";
+      decos.push(
+        Decoration.replace({
+          widget: new BlockMathWidget(math.from, math.to, math.tex, math.open, math.close, multiline),
+          block: true,
+          ...blockReveal(math.from, math.to),
+        }).range(math.from, math.to),
+      );
+    } else {
+      decos.push(
+        Decoration.replace({
+          widget: new InlineMathWidget(math.from, math.to, math.tex),
+        }).range(math.from, math.to),
+      );
+    }
   }
 
   // ==高亮==、<u>/<mark>/<b>/<i>/<kbd> 等行内标签

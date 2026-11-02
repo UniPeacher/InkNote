@@ -8,6 +8,9 @@ import {
   makePlainTextEditable,
 } from "./editableSource";
 import { getLocale, t } from "../../lib/i18n";
+import { scanMathText, type MathRange } from "../../lib/mathSyntax";
+
+export type { MathRange };
 
 function renderMath(target: HTMLElement, tex: string, display: boolean) {
   try {
@@ -61,12 +64,28 @@ export class BlockMathWidget extends WidgetType {
     readonly from: number,
     readonly to: number,
     readonly tex: string,
+    /** 原文定界符，回写时保持用户原本的写法（`$$` 或 `\[`） */
+    readonly open: string = "$$",
+    readonly close: string = "$$",
+    /** 源码里定界符是否各占一行；单行 `\[ x \]` 编辑后仍应是单行 */
+    readonly multiline: boolean = true,
   ) {
     super();
   }
 
   eq(other: BlockMathWidget) {
-    return other.to - other.from === this.to - this.from && other.tex === this.tex;
+    return other.to - other.from === this.to - this.from &&
+      other.tex === this.tex &&
+      other.open === this.open &&
+      other.close === this.close &&
+      other.multiline === this.multiline;
+  }
+
+  private toMarkdown(text: string): string {
+    const body = text.trim();
+    return this.multiline
+      ? `${this.open}\n${body}\n${this.close}`
+      : `${this.open}${body}${this.close}`;
   }
 
   toDOM() {
@@ -89,7 +108,7 @@ export class BlockMathWidget extends WidgetType {
 
     attachSourceEditing(wrap, {
       source: () => source,
-      toMarkdown: (text) => `$$\n${text.trim()}\n$$`,
+      toMarkdown: (text) => this.toMarkdown(text),
       onInput: (text) => renderMath(render, text, true),
       indentOnTab: false,
     });
@@ -130,32 +149,11 @@ interface MathDoc {
   lines: number;
 }
 
-export interface MathRange {
-  from: number;
-  to: number;
-  tex: string;
-  block: boolean;
-}
-
-/** 区间是否恰好占满整行（决定能否用块级装饰） */
-function occupiesWholeLines(doc: MathDoc, from: number, to: number): boolean {
-  return doc.lineAt(from).from === from && doc.lineAt(to).to === to;
-}
-
-function isSpace(ch: string | undefined): boolean {
-  return ch === undefined || ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
-}
-
-function isDigit(ch: string | undefined): boolean {
-  return ch !== undefined && ch >= "0" && ch <= "9";
-}
-
 /**
  * 扫描文档中的数学公式区间（排除代码块内）。
  *
- * 行内公式采用与 Typora 一致的保守规则，避免把金额当成公式：
- * 开定界符后必须紧跟非空白、闭定界符前必须是非空白、闭定界符后不能紧跟数字。
- * 例如 `价格 $5 到 $10 元` 不会被识别为公式。
+ * 支持 `$...$` / `$$...$$` 与 LaTeX 原生的 `\(...\)` / `\[...\]`，具体规则见
+ * `lib/mathSyntax.ts`。后者在 CommonMark 里会被当成转义符，必须在这里先认出来。
  */
 export function scanMath(
   doc: MathDoc,
@@ -163,76 +161,5 @@ export function scanMath(
   sourceText?: string,
 ): MathRange[] {
   const text = sourceText ?? doc.sliceString(0, doc.length);
-  const results: MathRange[] = [];
-  let i = 0;
-
-  while (i < text.length) {
-    const ch = text[i];
-
-    if (ch === "\\") {
-      i += 2; // 跳过转义（含 \$）
-      continue;
-    }
-    if (ch !== "$") {
-      i++;
-      continue;
-    }
-
-    // 块级 $$...$$
-    if (text[i + 1] === "$") {
-      const close = text.indexOf("$$", i + 2);
-      if (close < 0) {
-        i += 2;
-        continue;
-      }
-      const from = i;
-      const to = close + 2;
-      if (!inCode(from, to)) {
-        results.push({
-          from,
-          to,
-          tex: text.slice(from + 2, close).trim(),
-          block: occupiesWholeLines(doc, from, to),
-        });
-      }
-      i = to;
-      continue;
-    }
-
-    // 行内 $...$
-    if (isSpace(text[i + 1]) || text[i + 1] === undefined) {
-      i++;
-      continue;
-    }
-
-    let j = i + 1;
-    let close = -1;
-    while (j < text.length) {
-      const c = text[j];
-      if (c === "\n") break;
-      if (c === "\\") {
-        j += 2;
-        continue;
-      }
-      if (c === "$") {
-        if (!isSpace(text[j - 1]) && !isDigit(text[j + 1])) close = j;
-        break;
-      }
-      j++;
-    }
-
-    if (close < 0) {
-      i++;
-      continue;
-    }
-
-    const from = i;
-    const to = close + 1;
-    if (!inCode(from, to)) {
-      results.push({ from, to, tex: text.slice(from + 1, close).trim(), block: false });
-    }
-    i = to;
-  }
-
-  return results;
+  return scanMathText(text, inCode);
 }

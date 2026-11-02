@@ -44,4 +44,16 @@ describe("markdownToBodyHtml", () => {
 
     expect(html).toContain(`src="${dataUrl}"`);
   });
+
+  it("renders LaTeX-native \\(...\\) and \\[...\\] delimiters as KaTeX", async () => {
+    const html = await markdownToBodyHtml(
+      "压差 \\(\\Delta p\\) 决定了\n\n\\[\n\\frac{dp}{dt} = k\n\\]\n",
+    );
+
+    expect(html).toContain("katex");
+    expect(html).toContain("katex-display");
+    // 定界符不能被当成转义吃掉：正文里不该出现裸的 `\(` 或生 LaTeX 段落
+    expect(html).not.toContain("<p>压差 (");
+    expect(html).not.toContain("<p>\\[");
+  });
 });

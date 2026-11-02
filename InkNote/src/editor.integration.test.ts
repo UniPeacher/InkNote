@@ -116,6 +116,59 @@ describe("Markdown 所见即所得预览", () => {
     expect(parent.textContent).not.toContain("$$");
   });
 
+  it("renders LaTeX-native \\(...\\) and \\[...\\] delimiters", () => {
+    const math = [
+      "在压差 \\(\\Delta p\\) 基本一致时，流量 \\(Q\\) 与面积 \\(A\\) 成正比。",
+      "",
+      "\\[",
+      "\\frac{dp}{dt} = \\frac{\\beta_e}{V} \\cdot Q_{in}",
+      "\\]",
+    ].join("\n");
+    const { parent } = mount(math);
+
+    // 三处行内公式都要变成真 KaTeX，而不是裸括号 + 生 LaTeX
+    expect(parent.querySelectorAll(".md-math-inline .katex")).toHaveLength(3);
+    const block = parent.querySelector<HTMLElement>(".md-math-block");
+    expect(block?.innerHTML).toContain("class=\"katex");
+    // 定界符本身必须被替换装饰吃掉了，不能残留在可见文本里
+    const visible = Array.from(parent.querySelectorAll(".md-math-inline, .md-math-block"))
+      .map((el) => el.textContent ?? "")
+      .join("\n");
+    expect(visible).not.toContain("\\(");
+    expect(visible).not.toContain("\\[");
+    expect(parent.querySelectorAll(".md-math-empty")).toHaveLength(0);
+  });
+
+  it("writes LaTeX block edits back with the delimiters the user already had", () => {
+    const math = [
+      "\\[",
+      "\\frac{dp}{dt} = k",
+      "\\]",
+    ].join("\n");
+    const { parent, handle } = mount(math);
+
+    const block = parent.querySelector<HTMLElement>(".md-math-block");
+    expect(block).not.toBeNull();
+    const source = block!.querySelector<HTMLElement>(".md-block-source")!;
+    expect(source.textContent).toBe("\\frac{dp}{dt} = k");
+
+    // 模拟用户就地改 LaTeX
+    source.textContent = "\\frac{dp}{dt} = 2k";
+    source.dispatchEvent(new InputEvent("input", { bubbles: true }));
+
+    return new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        const doc = handle.view.state.doc.toString();
+        // 保留 \[...\] 而不是悄悄换成 $$...$$
+        expect(doc).toContain("\\[");
+        expect(doc).toContain("\\]");
+        expect(doc).not.toContain("$$");
+        expect(doc).toContain("= 2k");
+        resolve();
+      });
+    });
+  });
+
   it("keeps consecutive block formulas rendered when the editor selection enters them", () => {
     const math = [
       "$$",
